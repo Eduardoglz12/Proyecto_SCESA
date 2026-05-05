@@ -42,5 +42,7 @@ dependencies {
     val ktorVersion = "3.4.3" // La misma versión de tu proyecto
     implementation("io.ktor:ktor-client-core:$ktorVersion")
     implementation("io.ktor:ktor-client-cio:$ktorVersion")
+    implementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
+
 }
 
