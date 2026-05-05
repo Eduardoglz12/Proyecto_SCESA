@@ -18,6 +18,7 @@ import org.jetbrains.exposed.sql.*
 import java.time.*
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 
 // ==========================================
 // 1. MODELOS DE DATOS
@@ -296,5 +297,42 @@ fun Application.configureRouting() {
                 call.respond(HttpStatusCode.InternalServerError, e.message ?: "Error")
             }
         }
+
+        // --- RUTA: Editar Alumno ---
+        put("/api/alumnos/{nc}") {
+            val nc = call.parameters["nc"] ?: return@put call.respond(HttpStatusCode.BadRequest)
+            val request = call.receive<AlumnoRequest>()
+            try {
+                dbQuery {
+                    Alumnos.update({ Alumnos.numeroControl eq nc }) {
+                        it[nombreCompleto] = request.nombreCompleto
+                        it[grado] = request.grado
+                        it[grupo] = request.grupo
+                        it[turno] = request.turno
+                        it[nombreTutor] = request.nombreTutor
+                        it[emailTutor] = request.emailTutor
+                    }
+                }
+                call.respond(HttpStatusCode.OK, "Datos actualizados correctamente")
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Error al editar: ${e.message}")
+            }
+        }
+
+// --- RUTA: Eliminar Alumno ---
+        delete("/api/alumnos/{nc}") {
+            val nc = call.parameters["nc"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
+            try {
+                dbQuery {
+                    // Nota: Si el alumno ya tiene asistencias, podrías necesitar borrar sus registros primero
+                    // o usar un borrado lógico. Aquí lo borramos físicamente:
+                    Alumnos.deleteWhere { Alumnos.numeroControl eq nc }
+                }
+                call.respond(HttpStatusCode.OK, "Alumno eliminado del sistema")
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Error al eliminar: ${e.message}")
+            }
+        }
+
     }
 }
