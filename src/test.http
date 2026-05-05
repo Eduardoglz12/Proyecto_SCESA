@@ -1,0 +1,23 @@
+### 1. Dar de alta al alumno en el padrón
+POST http://127.0.0.1:8080/api/alumnos
+Content-Type: application/json
+
+{
+  "numeroControl": "21305051234567",
+  "nombreCompleto": "Juan Perez",
+  "grado": 6,
+  "grupo": "A",
+  "turno": "Matutino"
+}
+
+### 2. Simular el escaneo de QR (Entrada)
+POST http://127.0.0.1:8080/api/asistencia/escanear
+Content-Type: application/json
+
+{
+  "numeroControl": "21305051234567",
+  "operadorId": 1
+}
+
+### Consultar todos los registros
+GET http://127.0.0.1:8080/api/asistencia
