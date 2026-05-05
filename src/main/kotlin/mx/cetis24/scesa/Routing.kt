@@ -50,6 +50,15 @@ data class AsistenciaRespuesta(
     val fecha: String,
     val operador: Int
 )
+
+@kotlinx.serialization.Serializable
+data class StatsDashboard(
+    val totalAlumnos: Long,
+    val entradasHoy: Long,
+    val presentes: Long,
+    val alertas: Int
+)
+
 // ==========================================
 // 2. CONFIGURACIÓN DE RUTAS
 // ==========================================
@@ -241,6 +250,41 @@ fun Application.configureRouting() {
                 call.respond(historial)
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.InternalServerError, "Error: ${e.message}")
+            }
+        }
+
+        get("/api/asistencia/stats") {
+            try {
+                val stats = dbQuery {
+                    // Configurar tiempo local de Coahuila
+                    val zonaCoahuila = java.time.ZoneId.of("America/Monterrey")
+                    val hoyInicio = java.time.ZonedDateTime.now(zonaCoahuila).toLocalDate().atStartOfDay()
+
+                    // 1. Total de alumnos registrados
+                    val total = Alumnos.selectAll().count()
+
+                    // 2. Entradas de hoy
+                    val entradas = RegistrosAsistencia.select {
+                        (RegistrosAsistencia.tipoEvento eq "ENTRADA") and
+                                (RegistrosAsistencia.timestampRegistro greaterEq hoyInicio)
+                    }.count()
+
+                    // 3. Salidas de hoy
+                    val salidas = RegistrosAsistencia.select {
+                        (RegistrosAsistencia.tipoEvento eq "SALIDA") and
+                                (RegistrosAsistencia.timestampRegistro greaterEq hoyInicio)
+                    }.count()
+
+                    StatsDashboard(
+                        totalAlumnos = total,
+                        entradasHoy = entradas,
+                        presentes = entradas - salidas,
+                        alertas = 0 // Espacio para lógica futura de retardos
+                    )
+                }
+                call.respond(stats)
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Error en estadísticas: ${e.message}")
             }
         }
 
