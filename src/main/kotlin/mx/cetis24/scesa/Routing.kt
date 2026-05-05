@@ -77,7 +77,7 @@ suspend fun enviarCorreoSalida(email: String, nombre: String, horaEntrada: Strin
             header("Authorization", "Bearer $apiKey")
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
-                put("from", "SIREA - CETIS 24 <onboarding@resend.dev>")
+                put("from", "SCESA - CETIS 24 <onboarding@resend.dev>")
                 put("to", JsonArray(listOf(JsonPrimitive(email))))
                 put("subject", "Resumen de Asistencia - $nombre")
                 put("html", """
@@ -94,7 +94,7 @@ suspend fun enviarCorreoSalida(email: String, nombre: String, horaEntrada: Strin
                             </li>
                         </ul>
                         <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-                        <p style="font-size: 12px; color: #666;">Este es un mensaje automático del sistema SIREA - CETIS 24.</p>
+                        <p style="font-size: 12px; color: #666;">Este es un mensaje automático del sistema SCESA - CETIS 24.</p>
                     </div>
                 """.trimIndent())
             })
