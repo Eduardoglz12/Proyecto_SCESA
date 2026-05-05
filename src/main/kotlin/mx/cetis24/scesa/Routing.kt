@@ -24,7 +24,9 @@ data class AlumnoRequest(
     val nombreCompleto: String,
     val grado: Int,
     val grupo: String,
-    val turno: String
+    val turno: String,
+    val nombreTutor: String, // Nuevo campo
+    val emailTutor: String    // Nuevo campo
 )
 
 @kotlinx.serialization.Serializable
@@ -61,6 +63,8 @@ fun Application.configureRouting() {
                         it[grado] = request.grado
                         it[grupo] = request.grupo
                         it[turno] = request.turno
+                        it[nombreTutor] = request.nombreTutor // Asignar nuevo campo
+                        it[emailTutor] = request.emailTutor   // Asignar nuevo campo
                     }
                 }
                 call.respond(HttpStatusCode.Created, "Alumno ${request.nombreCompleto} registrado correctamente.")
@@ -169,7 +173,9 @@ fun Application.configureRouting() {
                             nombreCompleto = it[mx.cetis24.scesa.database.Alumnos.nombreCompleto],
                             grado = it[mx.cetis24.scesa.database.Alumnos.grado],
                             grupo = it[mx.cetis24.scesa.database.Alumnos.grupo],
-                            turno = it[mx.cetis24.scesa.database.Alumnos.turno]
+                            turno = it[mx.cetis24.scesa.database.Alumnos.turno],
+                            nombreTutor = it[mx.cetis24.scesa.database.Alumnos.nombreTutor] ?: "Sin asignar",
+                            emailTutor = it[mx.cetis24.scesa.database.Alumnos.emailTutor] ?: "Sin asignar"
                         )
                     }
                 }
