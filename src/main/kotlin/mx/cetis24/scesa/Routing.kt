@@ -70,42 +70,37 @@ val httpClient = HttpClient(CIO) {
     }
 }
 
-suspend fun enviarCorreoSalida(email: String, nombre: String, hora: String) {
-    val apiKey = System.getenv("RESEND_API_KEY")
-    if (apiKey.isNullOrBlank()) {
-        println("⚠️ ERROR: RESEND_API_KEY no encontrada en variables de entorno.")
-        return
-    }
-
+suspend fun enviarCorreoSalida(email: String, nombre: String, horaEntrada: String, horaSalida: String) {
+    val apiKey = System.getenv("RESEND_API_KEY") ?: return
     try {
-        val response = httpClient.post("https://api.resend.com/emails") {
+        httpClient.post("https://api.resend.com/emails") {
             header("Authorization", "Bearer $apiKey")
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
                 put("from", "SIREA - CETIS 24 <onboarding@resend.dev>")
                 put("to", JsonArray(listOf(JsonPrimitive(email))))
-                put("subject", "Notificación de Salida - $nombre")
+                put("subject", "Resumen de Asistencia - $nombre")
                 put("html", """
-                    <div style="font-family: sans-serif; border: 1px solid #eee; padding: 20px;">
-                        <h2 style="color: #1A3A5C;">Aviso de Salida Escolar</h2>
+                    <div style="font-family: sans-serif; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+                        <h2 style="color: #1A3A5C;">Resumen de Jornada Escolar</h2>
                         <p>Estimado Tutor,</p>
-                        <p>Le informamos que el alumno <b>$nombre</b> ha registrado su <b>SALIDA</b> del plantel a las <b>$hora</b>.</p>
-                        <p style="font-size: 12px; color: #666;">Este es un mensaje automático del sistema SIREA.</p>
+                        <p>Le informamos los horarios registrados hoy para el alumno <b>$nombre</b>:</p>
+                        <ul style="list-style: none; padding: 0;">
+                            <li style="margin-bottom: 10px;">
+                                <span style="color: #22C55E; font-weight: bold;">● Hora de Entrada:</span> $horaEntrada
+                            </li>
+                            <li style="margin-bottom: 10px;">
+                                <span style="color: #EF4444; font-weight: bold;">● Hora de Salida:</span> $horaSalida
+                            </li>
+                        </ul>
+                        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+                        <p style="font-size: 12px; color: #666;">Este es un mensaje automático del sistema SIREA - CETIS 24.</p>
                     </div>
                 """.trimIndent())
             })
         }
-
-        // --- NUEVA LÓGICA DE LOGS ---
-        if (response.status.value in 200..299) {
-            println("✅ Resend: Correo enviado con éxito a $email")
-        } else {
-            val errorBody = response.bodyAsText() // Necesitas importar io.ktor.client.statement.bodyAsText
-            println("❌ Error de Resend (${response.status}): $errorBody")
-        }
     } catch (e: Exception) {
-        println("❌ Error crítico enviando correo: ${e.message}")
-        e.printStackTrace()
+        println("Error enviando correo: ${e.message}")
     }
 }
 
@@ -218,12 +213,35 @@ fun Application.configureRouting() {
 
                 // --- 4. ENVÍO DE CORREO SI ES SALIDA ---
                 if (nuevoTipo == "SALIDA" && info["email"]!!.isNotBlank()) {
+                    // 1. Buscamos la hora de entrada de hoy para este alumno
+                    val timestampEntrada = dbQuery {
+                        RegistrosAsistencia.select {
+                            (RegistrosAsistencia.numeroControl eq request.numeroControl) and
+                                    (RegistrosAsistencia.tipoEvento eq "ENTRADA") and
+                                    (RegistrosAsistencia.timestampRegistro greaterEq hoyInicio)
+                        }
+                            .orderBy(RegistrosAsistencia.timestampRegistro to SortOrder.DESC)
+                            .limit(1)
+                            .map { it[RegistrosAsistencia.timestampRegistro] }
+                            .singleOrNull()
+                    }
+
+                    // 2. Disparamos el correo con ambos datos
                     launch {
-                        val horaFormateada = ahora.format(DateTimeFormatter.ofPattern("hh:mm a"))
-                        enviarCorreoSalida(info["email"]!!, info["nombre"]!!, horaFormateada)
+                        val formato = DateTimeFormatter.ofPattern("hh:mm a")
+                        val horaSalidaTxt = ahora.format(formato)
+
+                        // Si por alguna razón no hay registro de entrada, ponemos "No registrada"
+                        val horaEntradaTxt = timestampEntrada?.format(formato) ?: "No registrada"
+
+                        enviarCorreoSalida(
+                            info["email"]!!,
+                            info["nombre"]!!,
+                            horaEntradaTxt,
+                            horaSalidaTxt
+                        )
                     }
                 }
-
                 call.respond(HttpStatusCode.Created, "$nuevoTipo registrado para ${info["nombre"]}")
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.BadRequest, "Error: ${e.message}")
