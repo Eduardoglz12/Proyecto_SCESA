@@ -8,6 +8,8 @@ import io.ktor.http.*
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.request.*
+import io.ktor.client.statement.bodyAsText
+import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.*
 import mx.cetis24.scesa.database.DatabaseFactory.dbQuery
 import mx.cetis24.scesa.database.RegistrosAsistencia
@@ -59,12 +61,24 @@ data class StatsDashboard(
 // 2. LÓGICA DE CORREO (RESEND)
 // ==========================================
 
-val httpClient = HttpClient(CIO)
+val httpClient = HttpClient(CIO) {
+    install(io.ktor.client.plugins.contentnegotiation.ContentNegotiation) {
+        json(Json {
+            ignoreUnknownKeys = true
+            prettyPrint = true
+        })
+    }
+}
 
 suspend fun enviarCorreoSalida(email: String, nombre: String, hora: String) {
-    val apiKey = System.getenv("RESEND_API_KEY") ?: return
+    val apiKey = System.getenv("RESEND_API_KEY")
+    if (apiKey.isNullOrBlank()) {
+        println("⚠️ ERROR: RESEND_API_KEY no encontrada en variables de entorno.")
+        return
+    }
+
     try {
-        httpClient.post("https://api.resend.com/emails") {
+        val response = httpClient.post("https://api.resend.com/emails") {
             header("Authorization", "Bearer $apiKey")
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
@@ -81,8 +95,17 @@ suspend fun enviarCorreoSalida(email: String, nombre: String, hora: String) {
                 """.trimIndent())
             })
         }
+
+        // --- NUEVA LÓGICA DE LOGS ---
+        if (response.status.value in 200..299) {
+            println("✅ Resend: Correo enviado con éxito a $email")
+        } else {
+            val errorBody = response.bodyAsText() // Necesitas importar io.ktor.client.statement.bodyAsText
+            println("❌ Error de Resend (${response.status}): $errorBody")
+        }
     } catch (e: Exception) {
-        println("Error enviando correo: ${e.message}")
+        println("❌ Error crítico enviando correo: ${e.message}")
+        e.printStackTrace()
     }
 }
 
