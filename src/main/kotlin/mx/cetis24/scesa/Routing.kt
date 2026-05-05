@@ -5,24 +5,20 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.http.*
+import io.ktor.client.*
+import io.ktor.client.engine.cio.*
+import io.ktor.client.request.*
+import kotlinx.serialization.json.*
 import mx.cetis24.scesa.database.DatabaseFactory.dbQuery
 import mx.cetis24.scesa.database.RegistrosAsistencia
-import org.jetbrains.exposed.sql.insert
-import java.time.LocalDateTime
-import org.jetbrains.exposed.sql.*
-import java.time.LocalDate
-import java.time.LocalTime
-import java.time.Duration
-import java.time.ZonedDateTime
-import java.time.ZoneId
-// Importa tus tablas desde el paquete de base de datos
 import mx.cetis24.scesa.database.Alumnos
-
-// Importa las funciones de Exposed para que funcionen el .select, .eq, etc.
 import org.jetbrains.exposed.sql.*
+import java.time.*
+import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.launch
 
 // ==========================================
-// 1. MODELOS DE DATOS (Van afuera)
+// 1. MODELOS DE DATOS
 // ==========================================
 
 @kotlinx.serialization.Serializable
@@ -32,8 +28,8 @@ data class AlumnoRequest(
     val grado: Int,
     val grupo: String,
     val turno: String,
-    val nombreTutor: String, // Nuevo campo
-    val emailTutor: String    // Nuevo campo
+    val nombreTutor: String,
+    val emailTutor: String
 )
 
 @kotlinx.serialization.Serializable
@@ -43,9 +39,9 @@ data class EscaneoRequest(val numeroControl: String, val operadorId: Int)
 data class AsistenciaRespuesta(
     val id: Int,
     val numeroControl: String,
-    val nombre: String,   // Agregado
-    val grupo: String,    // Agregado
-    val turno: String,    // Agregado
+    val nombre: String,
+    val grupo: String,
+    val turno: String,
     val evento: String,
     val fecha: String,
     val operador: Int
@@ -60,181 +56,166 @@ data class StatsDashboard(
 )
 
 // ==========================================
-// 2. CONFIGURACIÓN DE RUTAS
+// 2. LÓGICA DE CORREO (RESEND)
+// ==========================================
+
+val httpClient = HttpClient(CIO)
+
+suspend fun enviarCorreoSalida(email: String, nombre: String, hora: String) {
+    val apiKey = System.getenv("RESEND_API_KEY") ?: return
+    try {
+        httpClient.post("https://api.resend.com/emails") {
+            header("Authorization", "Bearer $apiKey")
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("from", "SIREA - CETIS 24 <onboarding@resend.dev>")
+                put("to", JsonArray(listOf(JsonPrimitive(email))))
+                put("subject", "Notificación de Salida - $nombre")
+                put("html", """
+                    <div style="font-family: sans-serif; border: 1px solid #eee; padding: 20px;">
+                        <h2 style="color: #1A3A5C;">Aviso de Salida Escolar</h2>
+                        <p>Estimado Tutor,</p>
+                        <p>Le informamos que el alumno <b>$nombre</b> ha registrado su <b>SALIDA</b> del plantel a las <b>$hora</b>.</p>
+                        <p style="font-size: 12px; color: #666;">Este es un mensaje automático del sistema SIREA.</p>
+                    </div>
+                """.trimIndent())
+            })
+        }
+    } catch (e: Exception) {
+        println("Error enviando correo: ${e.message}")
+    }
+}
+
+// ==========================================
+// 3. CONFIGURACIÓN DE RUTAS
 // ==========================================
 fun Application.configureRouting() {
     routing {
 
-        // --- RUTA 1: Prueba de servidor ---
-        get("/") {
-            call.respondText("Servidor SCESA Operativo 🚀")
+        get("/") { call.respondText("Servidor SCESA Operativo 🚀") }
+
+        // --- GESTIÓN DE ALUMNOS (GET y POST) ---
+
+        get("/api/alumnos") {
+            try {
+                val lista = dbQuery {
+                    Alumnos.selectAll().map {
+                        AlumnoRequest(
+                            numeroControl = it[Alumnos.numeroControl],
+                            nombreCompleto = it[Alumnos.nombreCompleto],
+                            grado = it[Alumnos.grado],
+                            grupo = it[Alumnos.grupo],
+                            turno = it[Alumnos.turno],
+                            nombreTutor = it[Alumnos.nombreTutor] ?: "",
+                            emailTutor = it[Alumnos.emailTutor] ?: ""
+                        )
+                    }
+                }
+                call.respond(lista)
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Error: ${e.message}")
+            }
         }
 
-        // --- RUTA 2: Registrar Alumnos en el padrón ---
         post("/api/alumnos") {
             try {
                 val request = call.receive<AlumnoRequest>()
                 dbQuery {
-                    // Verificamos existencia previa
                     val existe = Alumnos.select { Alumnos.numeroControl eq request.numeroControl }.any()
-                    if (existe) {
-                        throw IllegalArgumentException("El alumno con este número de control ya está registrado.")
-                    }
+                    if (existe) throw IllegalArgumentException("El alumno ya existe.")
 
                     Alumnos.insert {
+                        it[numeroControl] = request.numeroControl // ¡Importante!
                         it[nombreCompleto] = request.nombreCompleto
                         it[grado] = request.grado
                         it[grupo] = request.grupo
                         it[turno] = request.turno
-                        it[nombreTutor] = request.nombreTutor // Asignar nuevo campo
-                        it[emailTutor] = request.emailTutor   // Asignar nuevo campo
+                        it[nombreTutor] = request.nombreTutor
+                        it[emailTutor] = request.emailTutor
                     }
                 }
                 call.respond(HttpStatusCode.Created, "Alumno registrado.")
-            } catch (e: IllegalArgumentException) {
-                call.respond(HttpStatusCode.Conflict, e.message ?: "Conflicto")
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.BadRequest, "Error: ${e.message}")
             }
         }
 
+        // --- ASISTENCIA Y ESCANEO ---
+
         post("/api/asistencia/escanear") {
             try {
                 val request = call.receive<EscaneoRequest>()
-
-                // --- CORRECCIÓN 1: Configurar Zona Horaria de Coahuila ---
-                val zonaCoahuila = java.time.ZoneId.of("America/Monterrey")
-                val ahora = java.time.ZonedDateTime.now(zonaCoahuila).toLocalDateTime()
+                val zonaCoahuila = ZoneId.of("America/Monterrey")
+                val ahora = ZonedDateTime.now(zonaCoahuila).toLocalDateTime()
                 val hoyInicio = ahora.toLocalDate().atStartOfDay()
 
-                // 1. Verificamos que el alumno exista y obtenemos su info (para el mensaje de éxito)
-                val alumnoInfo = dbQuery<Triple<String, String, String>?> {
+                // 1. Obtenemos info completa (incluyendo email del tutor para Resend)
+                val info = dbQuery {
                     Alumnos.select { Alumnos.numeroControl eq request.numeroControl }
                         .map { row ->
-                            // Usar 'row' en lugar de 'it' a veces ayuda al autocompletado y a la inferencia
-                            Triple(row[Alumnos.nombreCompleto], row[Alumnos.grupo], row[Alumnos.turno])
-                        }
+                            mapOf(
+                                "nombre" to row[Alumnos.nombreCompleto],
+                                "grupo" to row[Alumnos.grupo],
+                                "turno" to row[Alumnos.turno],
+                                "email" to (row[Alumnos.emailTutor] ?: "")
+                            )
+                        }.singleOrNull()
+                } ?: return@post call.respond(HttpStatusCode.NotFound, "Número de control inválido")
+
+                // 2. Lógica de tipo de evento y cooldown
+                val ultimo = dbQuery {
+                    RegistrosAsistencia.select {
+                        (RegistrosAsistencia.numeroControl eq request.numeroControl) and
+                                (RegistrosAsistencia.timestampRegistro greaterEq hoyInicio)
+                    }.orderBy(RegistrosAsistencia.timestampRegistro to SortOrder.DESC).limit(1)
+                        .map { it[RegistrosAsistencia.tipoEvento] to it[RegistrosAsistencia.timestampRegistro] }
                         .singleOrNull()
                 }
 
-                if (alumnoInfo == null) {
-                    return@post call.respond(HttpStatusCode.NotFound, "Error: El número de control no existe.")
+                if (ultimo != null && Duration.between(ultimo.second, ahora).toMinutes() < 1) {
+                    return@post call.respond(HttpStatusCode.Conflict, "Espera 1 minuto.")
                 }
 
-                val (nombre, grupo, turno) = alumnoInfo
-
-                // 2. Buscamos el ÚLTIMO movimiento de hoy
-                val ultimoRegistro = dbQuery {
-                    RegistrosAsistencia
-                        .select {
-                            (RegistrosAsistencia.numeroControl eq request.numeroControl) and
-                                    (RegistrosAsistencia.timestampRegistro greaterEq hoyInicio)
-                        }
-                        .orderBy(RegistrosAsistencia.timestampRegistro to org.jetbrains.exposed.sql.SortOrder.DESC)
-                        .limit(1)
-                        .map {
-                            Pair(it[RegistrosAsistencia.tipoEvento], it[RegistrosAsistencia.timestampRegistro])
-                        }
-                        .singleOrNull()
-                }
-
-                val ultimoTipo = ultimoRegistro?.first
-                val ultimoTimestamp = ultimoRegistro?.second
-
-                // --- VALIDACIÓN: Cooldown de 1 minuto ---
-                if (ultimoTimestamp != null) {
-                    val diferencia = java.time.Duration.between(ultimoTimestamp, ahora).toMinutes()
-                    if (diferencia < 1) {
-                        return@post call.respond(
-                            HttpStatusCode.Conflict,
-                            "Escaneo ignorado: Espera 1 minuto entre registros."
-                        )
-                    }
-                }
-
-                val nuevoTipo = when (ultimoTipo) {
+                val nuevoTipo = when (ultimo?.first) {
                     null -> "ENTRADA"
                     "ENTRADA" -> "SALIDA"
-                    else -> return@post call.respond(
-                        HttpStatusCode.Forbidden,
-                        "El alumno ya cumplió su ciclo de Entrada/Salida por hoy."
-                    )
+                    else -> return@post call.respond(HttpStatusCode.Forbidden, "Ciclo diario completo.")
                 }
 
-                // 3. Insertar registro
+                // 3. Registrar
                 dbQuery {
                     RegistrosAsistencia.insert {
                         it[numeroControl] = request.numeroControl
                         it[tipoEvento] = nuevoTipo
                         it[metodoRegistro] = "QR"
-                        it[timestampRegistro] = ahora // Guardamos la hora de Coahuila
+                        it[timestampRegistro] = ahora
                         it[operadorId] = request.operadorId
                     }
                 }
 
-                // Respuesta enriquecida con los datos del alumno
-                call.respond(HttpStatusCode.Created, "¡$nuevoTipo exitosa! Alumno: $nombre ($grupo $turno)")
-
-            } catch (e: Exception) {
-                call.respond(HttpStatusCode.BadRequest, "Error en el servidor: ${e.message}")
-            }
-        }
-
-        get("/api/asistencia") {
-            try {
-                val historial = dbQuery {
-                    // Realizamos un INNER JOIN para conectar el escaneo con el perfil del alumno
-                    (RegistrosAsistencia innerJoin Alumnos)
-                        .slice(
-                            RegistrosAsistencia.id,
-                            RegistrosAsistencia.numeroControl,
-                            Alumnos.nombreCompleto,
-                            Alumnos.grupo,
-                            Alumnos.turno,
-                            RegistrosAsistencia.tipoEvento,
-                            RegistrosAsistencia.timestampRegistro,
-                            RegistrosAsistencia.operadorId
-                        )
-                        .selectAll()
-                        .orderBy(RegistrosAsistencia.timestampRegistro to SortOrder.DESC)
-                        .map {
-                            AsistenciaRespuesta(
-                                id = it[RegistrosAsistencia.id],
-                                numeroControl = it[RegistrosAsistencia.numeroControl],
-                                nombre = it[Alumnos.nombreCompleto], // Ahora disponible por el Join
-                                grupo = it[Alumnos.grupo],           // Ahora disponible por el Join
-                                turno = it[Alumnos.turno],           // Ahora disponible por el Join
-                                evento = it[RegistrosAsistencia.tipoEvento],
-                                fecha = it[RegistrosAsistencia.timestampRegistro].toString(),
-                                operador = it[RegistrosAsistencia.operadorId]
-                            )
-                        }
+                // --- 4. ENVÍO DE CORREO SI ES SALIDA ---
+                if (nuevoTipo == "SALIDA" && info["email"]!!.isNotBlank()) {
+                    launch {
+                        val horaFormateada = ahora.format(DateTimeFormatter.ofPattern("hh:mm a"))
+                        enviarCorreoSalida(info["email"]!!, info["nombre"]!!, horaFormateada)
+                    }
                 }
-                call.respond(historial)
+
+                call.respond(HttpStatusCode.Created, "$nuevoTipo registrado para ${info["nombre"]}")
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, "Error al obtener historial: ${e.message}")
+                call.respond(HttpStatusCode.BadRequest, "Error: ${e.message}")
             }
         }
 
         get("/api/asistencia") {
             try {
                 val historial = dbQuery {
-                    // Unimos Registros con Alumnos para obtener el perfil completo
                     (RegistrosAsistencia innerJoin Alumnos)
-                        .slice(
-                            RegistrosAsistencia.id,
-                            RegistrosAsistencia.numeroControl,
-                            Alumnos.nombreCompleto,
-                            Alumnos.grupo,
-                            Alumnos.turno,
-                            RegistrosAsistencia.tipoEvento,
-                            RegistrosAsistencia.timestampRegistro,
-                            RegistrosAsistencia.operadorId
-                        )
-                        .selectAll()
-                        .orderBy(RegistrosAsistencia.timestampRegistro to SortOrder.DESC)
+                        .slice(RegistrosAsistencia.id, RegistrosAsistencia.numeroControl, Alumnos.nombreCompleto,
+                            Alumnos.grupo, Alumnos.turno, RegistrosAsistencia.tipoEvento,
+                            RegistrosAsistencia.timestampRegistro, RegistrosAsistencia.operadorId)
+                        .selectAll().orderBy(RegistrosAsistencia.timestampRegistro to SortOrder.DESC)
                         .map {
-                            // Enviamos los datos que el Dashboard necesita
                             AsistenciaRespuesta(
                                 id = it[RegistrosAsistencia.id],
                                 numeroControl = it[RegistrosAsistencia.numeroControl],
@@ -256,37 +237,23 @@ fun Application.configureRouting() {
         get("/api/asistencia/stats") {
             try {
                 val stats = dbQuery {
-                    // Configurar tiempo local de Coahuila
-                    val zonaCoahuila = java.time.ZoneId.of("America/Monterrey")
-                    val hoyInicio = java.time.ZonedDateTime.now(zonaCoahuila).toLocalDate().atStartOfDay()
+                    val zona = ZoneId.of("America/Monterrey")
+                    val hoy = ZonedDateTime.now(zona).toLocalDate().atStartOfDay()
 
-                    // 1. Total de alumnos registrados
                     val total = Alumnos.selectAll().count()
-
-                    // 2. Entradas de hoy
                     val entradas = RegistrosAsistencia.select {
-                        (RegistrosAsistencia.tipoEvento eq "ENTRADA") and
-                                (RegistrosAsistencia.timestampRegistro greaterEq hoyInicio)
+                        (RegistrosAsistencia.tipoEvento eq "ENTRADA") and (RegistrosAsistencia.timestampRegistro greaterEq hoy)
                     }.count()
-
-                    // 3. Salidas de hoy
                     val salidas = RegistrosAsistencia.select {
-                        (RegistrosAsistencia.tipoEvento eq "SALIDA") and
-                                (RegistrosAsistencia.timestampRegistro greaterEq hoyInicio)
+                        (RegistrosAsistencia.tipoEvento eq "SALIDA") and (RegistrosAsistencia.timestampRegistro greaterEq hoy)
                     }.count()
 
-                    StatsDashboard(
-                        totalAlumnos = total,
-                        entradasHoy = entradas,
-                        presentes = entradas - salidas,
-                        alertas = 0 // Espacio para lógica futura de retardos
-                    )
+                    StatsDashboard(total, entradas, entradas - salidas, 0)
                 }
                 call.respond(stats)
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, "Error en estadísticas: ${e.message}")
+                call.respond(HttpStatusCode.InternalServerError, e.message ?: "Error")
             }
         }
-
     }
 }
