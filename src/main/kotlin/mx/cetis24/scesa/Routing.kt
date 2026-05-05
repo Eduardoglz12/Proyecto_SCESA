@@ -65,10 +65,14 @@ fun Application.configureRouting() {
         post("/api/alumnos") {
             try {
                 val request = call.receive<AlumnoRequest>()
-
                 dbQuery {
-                    mx.cetis24.scesa.database.Alumnos.insert {
-                        it[numeroControl] = request.numeroControl
+                    // Verificamos existencia previa
+                    val existe = Alumnos.select { Alumnos.numeroControl eq request.numeroControl }.any()
+                    if (existe) {
+                        throw IllegalArgumentException("El alumno con este número de control ya está registrado.")
+                    }
+
+                    Alumnos.insert {
                         it[nombreCompleto] = request.nombreCompleto
                         it[grado] = request.grado
                         it[grupo] = request.grupo
@@ -77,9 +81,11 @@ fun Application.configureRouting() {
                         it[emailTutor] = request.emailTutor   // Asignar nuevo campo
                     }
                 }
-                call.respond(HttpStatusCode.Created, "Alumno ${request.nombreCompleto} registrado correctamente.")
+                call.respond(HttpStatusCode.Created, "Alumno registrado.")
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.Conflict, e.message ?: "Conflicto")
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.BadRequest, "Error al registrar alumno: ${e.message}")
+                call.respond(HttpStatusCode.BadRequest, "Error: ${e.message}")
             }
         }
 
@@ -201,24 +207,40 @@ fun Application.configureRouting() {
             }
         }
 
-        get("/api/alumnos") {
+        get("/api/asistencia") {
             try {
-                val listaAlumnos = dbQuery {
-                    mx.cetis24.scesa.database.Alumnos.selectAll().map {
-                        AlumnoRequest(
-                            numeroControl = it[mx.cetis24.scesa.database.Alumnos.numeroControl],
-                            nombreCompleto = it[mx.cetis24.scesa.database.Alumnos.nombreCompleto],
-                            grado = it[mx.cetis24.scesa.database.Alumnos.grado],
-                            grupo = it[mx.cetis24.scesa.database.Alumnos.grupo],
-                            turno = it[mx.cetis24.scesa.database.Alumnos.turno],
-                            nombreTutor = it[mx.cetis24.scesa.database.Alumnos.nombreTutor] ?: "Sin asignar",
-                            emailTutor = it[mx.cetis24.scesa.database.Alumnos.emailTutor] ?: "Sin asignar"
+                val historial = dbQuery {
+                    // Unimos Registros con Alumnos para obtener el perfil completo
+                    (RegistrosAsistencia innerJoin Alumnos)
+                        .slice(
+                            RegistrosAsistencia.id,
+                            RegistrosAsistencia.numeroControl,
+                            Alumnos.nombreCompleto,
+                            Alumnos.grupo,
+                            Alumnos.turno,
+                            RegistrosAsistencia.tipoEvento,
+                            RegistrosAsistencia.timestampRegistro,
+                            RegistrosAsistencia.operadorId
                         )
-                    }
+                        .selectAll()
+                        .orderBy(RegistrosAsistencia.timestampRegistro to SortOrder.DESC)
+                        .map {
+                            // Enviamos los datos que el Dashboard necesita
+                            AsistenciaRespuesta(
+                                id = it[RegistrosAsistencia.id],
+                                numeroControl = it[RegistrosAsistencia.numeroControl],
+                                nombre = it[Alumnos.nombreCompleto],
+                                grupo = it[Alumnos.grupo],
+                                turno = it[Alumnos.turno],
+                                evento = it[RegistrosAsistencia.tipoEvento],
+                                fecha = it[RegistrosAsistencia.timestampRegistro].toString(),
+                                operador = it[RegistrosAsistencia.operadorId]
+                            )
+                        }
                 }
-                call.respond(listaAlumnos)
+                call.respond(historial)
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, "Error al obtener alumnos: ${e.message}")
+                call.respond(HttpStatusCode.InternalServerError, "Error: ${e.message}")
             }
         }
 
