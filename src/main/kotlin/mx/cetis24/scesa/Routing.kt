@@ -160,5 +160,24 @@ fun Application.configureRouting() {
             }
         }
 
+        get("/api/alumnos") {
+            try {
+                val listaAlumnos = dbQuery {
+                    mx.cetis24.scesa.database.Alumnos.selectAll().map {
+                        AlumnoRequest(
+                            numeroControl = it[mx.cetis24.scesa.database.Alumnos.numeroControl],
+                            nombreCompleto = it[mx.cetis24.scesa.database.Alumnos.nombreCompleto],
+                            grado = it[mx.cetis24.scesa.database.Alumnos.grado],
+                            grupo = it[mx.cetis24.scesa.database.Alumnos.grupo],
+                            turno = it[mx.cetis24.scesa.database.Alumnos.turno]
+                        )
+                    }
+                }
+                call.respond(listaAlumnos)
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Error al obtener alumnos: ${e.message}")
+            }
+        }
+
     }
 }
