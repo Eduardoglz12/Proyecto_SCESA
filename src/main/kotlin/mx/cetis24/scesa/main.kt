@@ -47,7 +47,7 @@ fun Application.configurarAutomatizacion() {
             // Calculamos cuántos milisegundos faltan para la hora acordada
             val milisegundosDeEspera = Duration.between(ahora, proximaEjecucion).toMillis()
 
-            println("Cron Job programado. El servidor dormirá por ${milisegundosDeEspera / 1000 / 60} minutos hasta las 17:00 hrs.")
+            println("Cron Job programado. El servidor dormirá por ${milisegundosDeEspera / 1000 / 60} minutos hasta las 19:00 hrs.")
 
             // Pausa el hilo en segundo plano (el cron)
             delay(milisegundosDeEspera)
