@@ -19,6 +19,8 @@ import java.time.*
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import io.ktor.http.content.*
+import java.io.InputStreamReader
 
 // ==========================================
 // 1. MODELOS DE DATOS
@@ -246,6 +248,67 @@ fun Application.configureRouting() {
                 call.respond(HttpStatusCode.Created, "$nuevoTipo registrado para ${info["nombre"]}")
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.BadRequest, "Error: ${e.message}")
+            }
+        }
+
+        post("/api/alumnos/importar") {
+            try {
+                val multipart = call.receiveMultipart()
+                var importados = 0
+                var omitidos = 0
+
+                multipart.forEachPart { part ->
+                    if (part is PartData.FileItem) {
+                        // Leer el archivo enviado
+                        val fileBytes = part.streamProvider().readBytes()
+                        val fileContent = String(fileBytes, Charsets.UTF_8)
+
+                        // Separar por líneas e ignorar líneas en blanco
+                        val lines = fileContent.lines().filter { it.isNotBlank() }
+
+                        // Detectar si la primera línea es el encabezado y saltarla
+                        val dataLines = if (lines.firstOrNull()?.contains("numeroControl", ignoreCase = true) == true) {
+                            lines.drop(1)
+                        } else {
+                            lines
+                        }
+
+                        dbQuery {
+                            for (line in dataLines) {
+                                // Separar por comas (CSV)
+                                val cols = line.split(",")
+
+                                // Validar que la fila tenga las 7 columnas requeridas
+                                if (cols.size >= 7) {
+                                    val nc = cols[0].trim()
+
+                                    // Verificar si el alumno ya existe para no duplicar
+                                    val existe = Alumnos.select { Alumnos.numeroControl eq nc }.any()
+
+                                    if (!existe) {
+                                        Alumnos.insert {
+                                            it[numeroControl] = nc
+                                            it[nombreCompleto] = cols[1].trim()
+                                            it[grado] = cols[2].trim().toIntOrNull() ?: 1
+                                            it[grupo] = cols[3].trim().uppercase()
+                                            it[turno] = cols[4].trim()
+                                            it[nombreTutor] = cols[5].trim()
+                                            it[emailTutor] = cols[6].trim()
+                                        }
+                                        importados++
+                                    } else {
+                                        omitidos++
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    part.dispose()
+                }
+
+                call.respond(HttpStatusCode.OK, "Se importaron $importados alumnos. Se omitieron $omitidos (ya existían o error de formato).")
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, "Error al procesar el archivo: ${e.message}")
             }
         }
 
