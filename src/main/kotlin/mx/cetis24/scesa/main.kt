@@ -3,6 +3,11 @@ package mx.cetis24.scesa
 import io.ktor.server.application.*
 import io.ktor.server.netty.EngineMain
 import mx.cetis24.scesa.database.DatabaseFactory
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.time.Duration
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 fun main(args: Array<String>) {
     // Esto arranca el servidor Netty usando la configuración de 'application.yaml'
@@ -22,4 +27,35 @@ fun Application.module() {
     configureSerialization()
     configureRouting()
     configureHTTP() // Aquí es donde vive la configuración de CORS
+    // Encendemos el robot nocturno
+    configurarAutomatizacion()
+}
+
+fun Application.configurarAutomatizacion() {
+    launch {
+        val zonaCoahuila = ZoneId.of("America/Monterrey")
+
+        while (true) { // Bucle infinito que mantiene vivo el proceso
+            val ahora = ZonedDateTime.now(zonaCoahuila)
+
+            // Queremos que se ejecute a las 9:00 PM (21:00 hrs)
+            var proximaEjecucion = ahora.withHour(23).withMinute(22).withSecond(0).withNano(0)
+
+            // Si ya pasaron las 9:00 PM de hoy, programamos para las 9:00 PM de mañana
+            if (ahora.isAfter(proximaEjecucion)) {
+                proximaEjecucion = proximaEjecucion.plusDays(1)
+            }
+
+            // Calculamos cuántos milisegundos faltan para la hora acordada
+            val milisegundosDeEspera = Duration.between(ahora, proximaEjecucion).toMillis()
+
+            println("⏱️ Cron Job programado. El servidor dormirá por ${milisegundosDeEspera / 1000 / 60} minutos hasta las 21:00 hrs.")
+
+            // Pausa el hilo en segundo plano (¡Ojo! no pausa el servidor de Ktor, solo este "cron")
+            delay(milisegundosDeEspera)
+
+            // ¡Es la hora! Ejecuta el cierre
+            ejecutarCierreDeJornada()
+        }
+    }
 }

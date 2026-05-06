@@ -107,6 +107,85 @@ suspend fun enviarCorreoSalida(email: String, nombre: String, horaEntrada: Strin
     }
 }
 
+suspend fun ejecutarCierreDeJornada() {
+    val zonaCoahuila = ZoneId.of("America/Monterrey")
+    val hoy = ZonedDateTime.now(zonaCoahuila).toLocalDate()
+    val hoyInicio = hoy.atStartOfDay()
+
+    try {
+        println("🔄 Iniciando revisión automática de Cierre de Jornada...")
+
+        // 1. Obtener los Números de Control que registraron ENTRADA hoy
+        val alumnosConEntrada = dbQuery {
+            RegistrosAsistencia.select {
+                (RegistrosAsistencia.tipoEvento eq "ENTRADA") and (RegistrosAsistencia.timestampRegistro greaterEq hoyInicio)
+            }.map { it[RegistrosAsistencia.numeroControl] }.distinct()
+        }
+
+        // 2. Obtener los Números de Control que registraron SALIDA hoy
+        val alumnosConSalida = dbQuery {
+            RegistrosAsistencia.select {
+                (RegistrosAsistencia.tipoEvento eq "SALIDA") and (RegistrosAsistencia.timestampRegistro greaterEq hoyInicio)
+            }.map { it[RegistrosAsistencia.numeroControl] }.distinct()
+        }
+
+        // 3. Matemáticas de conjuntos: Entradas menos Salidas = Los que faltaron
+        val faltaronDeSalir = alumnosConEntrada.filterNot { it in alumnosConSalida }
+
+        if (faltaronDeSalir.isEmpty()) {
+            println("✅ Todos los alumnos registraron su salida correctamente. No hay alertas.")
+            return
+        }
+
+        println("⚠️ Se detectaron ${faltaronDeSalir.size} alumnos sin salida. Enviando correos...")
+
+        // 4. Buscar los correos y enviar la alerta
+        dbQuery {
+            Alumnos.select { Alumnos.numeroControl inList faltaronDeSalir }
+                .forEach { row ->
+                    val email = row[Alumnos.emailTutor] ?: ""
+                    val nombre = row[Alumnos.nombreCompleto]
+
+                    if (email.isNotBlank()) {
+                        // Lanzamos una corrutina por cada correo para que se envíen rápido
+                        kotlinx.coroutines.GlobalScope.launch {
+                            enviarAlertaOmisionSalida(email, nombre)
+                        }
+                    }
+                }
+        }
+    } catch (e: Exception) {
+        println("❌ Error en el Cierre de Jornada automático: ${e.message}")
+    }
+}
+
+// Una variante de tu función de correo con un mensaje de "Alerta"
+suspend fun enviarAlertaOmisionSalida(email: String, nombre: String) {
+    val apiKey = System.getenv("RESEND_API_KEY") ?: return
+    try {
+        httpClient.post("https://api.resend.com/emails") {
+            header("Authorization", "Bearer $apiKey")
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("from", "SIREA - CETIS 24 <onboarding@resend.dev>")
+                put("to", JsonArray(listOf(JsonPrimitive(email))))
+                put("subject", "⚠️ AVISO: Omisión de registro de salida - $nombre")
+                put("html", """
+                    <div style="font-family: sans-serif; border: 1px solid #EF4444; padding: 20px; border-radius: 10px;">
+                        <h2 style="color: #EF4444;">Aviso de Sistema</h2>
+                        <p>Estimado Tutor,</p>
+                        <p>El sistema <b>SIREA</b> detectó que el alumno <b>$nombre</b> registró su entrada el día de hoy, pero <b>NO registró su salida</b> al finalizar el turno escolar.</p>
+                        <p>Esto puede ocurrir si el alumno olvidó escanear su credencial al retirarse del plantel.</p>
+                        <p style="font-size: 12px; color: #666;">Este es un mensaje automático del sistema.</p>
+                    </div>
+                """.trimIndent())
+            })
+        }
+    } catch (e: Exception) {
+        println("Error enviando alerta a $email: ${e.message}")
+    }
+}
+
 // ==========================================
 // 3. CONFIGURACIÓN DE RUTAS
 // ==========================================
