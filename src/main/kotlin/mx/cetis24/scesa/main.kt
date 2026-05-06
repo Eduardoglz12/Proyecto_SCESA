@@ -39,7 +39,7 @@ fun Application.configurarAutomatizacion() {
             val ahora = ZonedDateTime.now(zonaCoahuila)
 
             // Queremos que se ejecute a las 9:00 PM (21:00 hrs)
-            var proximaEjecucion = ahora.withHour(23).withMinute(22).withSecond(0).withNano(0)
+            var proximaEjecucion = ahora.withHour(23).withMinute(27).withSecond(0).withNano(0)
 
             // Si ya pasaron las 9:00 PM de hoy, programamos para las 9:00 PM de mañana
             if (ahora.isAfter(proximaEjecucion)) {
