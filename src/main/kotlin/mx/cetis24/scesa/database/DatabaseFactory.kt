@@ -17,12 +17,12 @@ object DatabaseFactory {
 
                 // CONFIGURACIÓN DE CONEXIÓN
                 // Cuando estemos en Railway, usaremos la variable de entorno.
-                // Localmente, puedes usar una cadena de prueba.
+                // Localmente, usamos una cadena de prueba.
                 jdbcUrl = System.getenv("JDBC_URL") ?: "jdbc:postgresql://localhost:5432/scesa_db"
                 username = System.getenv("DB_USER") ?: "postgres"
                 password = System.getenv("DB_PASSWORD") ?: "admin123"
 
-                // Optimización para el flujo del CETIS 24 (40-50 escaneos por minuto)
+                // Optimización para el flujo
                 maximumPoolSize = 10
                 isAutoCommit = false
                 transactionIsolation = "TRANSACTION_REPEATABLE_READ"
@@ -36,9 +36,9 @@ object DatabaseFactory {
                 SchemaUtils.create(Alumnos, RegistrosAsistencia)
             }
 
-            println("✅ Conexión a PostgreSQL inicializada correctamente.")
+            println("Conexión a PostgreSQL inicializada correctamente.")
         } catch (e: Exception) {
-            println("⚠️ ADVERTENCIA: No se pudo conectar a la base de datos: ${e.message}")
+            println("ADVERTENCIA: No se pudo conectar a la base de datos: ${e.message}")
             println("El servidor seguirá corriendo, pero las funciones de asistencia fallarán.")
         }
     }

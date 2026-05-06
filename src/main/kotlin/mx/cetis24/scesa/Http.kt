@@ -6,7 +6,7 @@ import io.ktor.server.plugins.cors.routing.*
 
 fun Application.configureHTTP() {
     install(CORS) {
-        // Permite que tu Dashboard (Vite) se conecte al Backend
+        // Permite que el Dashboard (Vite) se conecte al Backend
         anyHost()
 
         // Permite los métodos necesarios para SCESA
@@ -19,7 +19,7 @@ fun Application.configureHTTP() {
         allowHeader(HttpHeaders.Authorization)
         allowHeader(HttpHeaders.ContentType)
 
-        // Muy importante para cuando implementen el Login
+        //Temporal mientras se implementa el Login
         allowCredentials = true
     }
 }

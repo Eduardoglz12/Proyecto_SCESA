@@ -14,10 +14,9 @@ fun main(args: Array<String>) {
     EngineMain.main(args)
 }
 
-// Esta es la función principal de tu aplicación.
-// Aquí es donde "conectamos" todas las piezas del rompecabezas.
+// Esta es la función principal de la aplicación.
 fun Application.module() {
-    // 1. Iniciamos la conexión a PostgreSQL antes que nada
+    // 1. Iniciamos la conexión a PostgreSQL
     DatabaseFactory.init()
 
     // 2. ACTIVAR PLUGINS
@@ -26,22 +25,21 @@ fun Application.module() {
     // 3. Cargamos los plugins que generó Ktor (están en los otros archivos .kt)
     configureSerialization()
     configureRouting()
-    configureHTTP() // Aquí es donde vive la configuración de CORS
-    // Encendemos el robot nocturno
-    configurarAutomatizacion()
+    configureHTTP() // Configuración de CORS
+    configurarAutomatizacion() //Activar automatización cierre de entradas
 }
 
 fun Application.configurarAutomatizacion() {
     launch {
         val zonaCoahuila = ZoneId.of("America/Monterrey")
 
-        while (true) { // Bucle infinito que mantiene vivo el proceso
+        while (true) { // Bucle infinito que mantiene el proceso
             val ahora = ZonedDateTime.now(zonaCoahuila)
 
-            // Queremos que se ejecute a las 9:00 PM (21:00 hrs)
-            var proximaEjecucion = ahora.withHour(23).withMinute(27).withSecond(0).withNano(0)
+            // Queremos que se ejecute a las 7:00 PM (19:00 hrs)
+            var proximaEjecucion = ahora.withHour(19).withMinute(0).withSecond(0).withNano(0)
 
-            // Si ya pasaron las 9:00 PM de hoy, programamos para las 9:00 PM de mañana
+            // Si ya pasaron las 7:00 PM de hoy, programamos para las 7:00 PM de mañana
             if (ahora.isAfter(proximaEjecucion)) {
                 proximaEjecucion = proximaEjecucion.plusDays(1)
             }
@@ -49,12 +47,12 @@ fun Application.configurarAutomatizacion() {
             // Calculamos cuántos milisegundos faltan para la hora acordada
             val milisegundosDeEspera = Duration.between(ahora, proximaEjecucion).toMillis()
 
-            println("⏱️ Cron Job programado. El servidor dormirá por ${milisegundosDeEspera / 1000 / 60} minutos hasta las 21:00 hrs.")
+            println("Cron Job programado. El servidor dormirá por ${milisegundosDeEspera / 1000 / 60} minutos hasta las 17:00 hrs.")
 
-            // Pausa el hilo en segundo plano (¡Ojo! no pausa el servidor de Ktor, solo este "cron")
+            // Pausa el hilo en segundo plano (el cron)
             delay(milisegundosDeEspera)
 
-            // ¡Es la hora! Ejecuta el cierre
+            // Ejecuta el cierre
             ejecutarCierreDeJornada()
         }
     }

@@ -22,9 +22,7 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import io.ktor.http.content.*
 import java.io.InputStreamReader
 
-// ==========================================
 // 1. MODELOS DE DATOS
-// ==========================================
 
 @kotlinx.serialization.Serializable
 data class AlumnoRequest(
@@ -60,9 +58,7 @@ data class StatsDashboard(
     val alertas: Int
 )
 
-// ==========================================
 // 2. LÓGICA DE CORREO (RESEND)
-// ==========================================
 
 val httpClient = HttpClient(CIO) {
     install(io.ktor.client.plugins.contentnegotiation.ContentNegotiation) {
@@ -129,15 +125,15 @@ suspend fun ejecutarCierreDeJornada() {
             }.map { it[RegistrosAsistencia.numeroControl] }.distinct()
         }
 
-        // 3. Matemáticas de conjuntos: Entradas menos Salidas = Los que faltaron
+        // 3. Entradas menos Salidas = Los que faltaron
         val faltaronDeSalir = alumnosConEntrada.filterNot { it in alumnosConSalida }
 
         if (faltaronDeSalir.isEmpty()) {
-            println("✅ Todos los alumnos registraron su salida correctamente. No hay alertas.")
+            println("Todos los alumnos registraron su salida correctamente. No hay alertas.")
             return
         }
 
-        println("⚠️ Se detectaron ${faltaronDeSalir.size} alumnos sin salida. Enviando correos...")
+        println("Se detectaron ${faltaronDeSalir.size} alumnos sin salida. Enviando correos...")
 
         // 4. Buscar los correos y enviar la alerta
         dbQuery {
@@ -155,11 +151,11 @@ suspend fun ejecutarCierreDeJornada() {
                 }
         }
     } catch (e: Exception) {
-        println("❌ Error en el Cierre de Jornada automático: ${e.message}")
+        println("Error en el Cierre de Jornada automático: ${e.message}")
     }
 }
 
-// Una variante de tu función de correo con un mensaje de "Alerta"
+// Una variante de la función de correo con un mensaje de "Alerta"
 suspend fun enviarAlertaOmisionSalida(email: String, nombre: String) {
     val apiKey = System.getenv("RESEND_API_KEY") ?: return
     try {
@@ -167,14 +163,14 @@ suspend fun enviarAlertaOmisionSalida(email: String, nombre: String) {
             header("Authorization", "Bearer $apiKey")
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
-                put("from", "SIREA - CETIS 24 <onboarding@resend.dev>")
+                put("from", "SCESA - CETIS 24 <onboarding@resend.dev>")
                 put("to", JsonArray(listOf(JsonPrimitive(email))))
                 put("subject", "⚠️ AVISO: Omisión de registro de salida - $nombre")
                 put("html", """
                     <div style="font-family: sans-serif; border: 1px solid #EF4444; padding: 20px; border-radius: 10px;">
                         <h2 style="color: #EF4444;">Aviso de Sistema</h2>
                         <p>Estimado Tutor,</p>
-                        <p>El sistema <b>SIREA</b> detectó que el alumno <b>$nombre</b> registró su entrada el día de hoy, pero <b>NO registró su salida</b> al finalizar el turno escolar.</p>
+                        <p>El sistema <b>SCESA</b> detectó que el alumno <b>$nombre</b> registró su entrada el día de hoy, pero <b>NO registró su salida</b> al finalizar el turno escolar.</p>
                         <p>Esto puede ocurrir si el alumno olvidó escanear su credencial al retirarse del plantel.</p>
                         <p style="font-size: 12px; color: #666;">Este es un mensaje automático del sistema.</p>
                     </div>
@@ -186,15 +182,13 @@ suspend fun enviarAlertaOmisionSalida(email: String, nombre: String) {
     }
 }
 
-// ==========================================
 // 3. CONFIGURACIÓN DE RUTAS
-// ==========================================
 fun Application.configureRouting() {
     routing {
 
-        get("/") { call.respondText("Servidor SCESA Operativo 🚀") }
+        get("/") { call.respondText("Servidor SCESA Operativo") }
 
-        // --- GESTIÓN DE ALUMNOS (GET y POST) ---
+        // GESTIÓN DE ALUMNOS (GET y POST)
 
         get("/api/alumnos") {
             try {
@@ -240,7 +234,7 @@ fun Application.configureRouting() {
             }
         }
 
-        // --- ASISTENCIA Y ESCANEO ---
+        // ASISTENCIA Y ESCANEO
 
         post("/api/asistencia/escanear") {
             try {
@@ -293,7 +287,7 @@ fun Application.configureRouting() {
                     }
                 }
 
-                // --- 4. ENVÍO DE CORREO SI ES SALIDA ---
+                // 4. ENVÍO DE CORREO SI ES SALIDA
                 if (nuevoTipo == "SALIDA" && info["email"]!!.isNotBlank()) {
                     // 1. Buscamos la hora de entrada de hoy para este alumno
                     val timestampEntrada = dbQuery {
@@ -440,7 +434,7 @@ fun Application.configureRouting() {
             }
         }
 
-        // --- RUTA: Editar Alumno ---
+        // Editar Alumno
         put("/api/alumnos/{nc}") {
             val nc = call.parameters["nc"] ?: return@put call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<AlumnoRequest>()
@@ -461,12 +455,12 @@ fun Application.configureRouting() {
             }
         }
 
-// --- RUTA: Eliminar Alumno ---
+        //Eliminar Alumno
         delete("/api/alumnos/{nc}") {
             val nc = call.parameters["nc"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
             try {
                 dbQuery {
-                    // Nota: Si el alumno ya tiene asistencias, podrías necesitar borrar sus registros primero
+                    // Si el alumno ya tiene asistencias podrías necesitarse borrar sus registros primero
                     // o usar un borrado lógico. Aquí lo borramos físicamente:
                     Alumnos.deleteWhere { Alumnos.numeroControl eq nc }
                 }
