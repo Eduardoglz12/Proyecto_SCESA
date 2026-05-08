@@ -76,7 +76,7 @@ suspend fun enviarCorreoSalida(email: String, nombre: String, horaEntrada: Strin
             header("Authorization", "Bearer $apiKey")
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
-                put("from", "SCESA - CETIS 24 <onboarding@resend.dev>")
+                put("from", "SCESA - CETIS 24 <asistencias@gpsteclaguna.com>")
                 put("to", JsonArray(listOf(JsonPrimitive(email))))
                 put("subject", "Resumen de Asistencia - $nombre")
                 put("html", """
@@ -163,7 +163,7 @@ suspend fun enviarAlertaOmisionSalida(email: String, nombre: String) {
             header("Authorization", "Bearer $apiKey")
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
-                put("from", "SCESA - CETIS 24 <onboarding@resend.dev>")
+                put("from", "SCESA - CETIS 24 <asistencias@gpsteclaguna.com>")
                 put("to", JsonArray(listOf(JsonPrimitive(email))))
                 put("subject", "⚠️ AVISO: Omisión de registro de salida - $nombre")
                 put("html", """
